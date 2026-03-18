@@ -243,7 +243,6 @@ static int load_config_from_csv(const char *path) {
     }
     ticker_config.tickers = temp_tickers;
     ticker_config.count = line_count;
-    current_ticker_idx = 0;
     mutex_unlock(&ticker_config.lock);
     
     printk(KERN_INFO "price_feed: Loaded %d tickers from config\n", line_count);
