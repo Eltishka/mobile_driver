@@ -14,7 +14,7 @@ Linux kernel character device driver for generating price feed quotes with CSV-b
 ### 1. Clone repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Eltishka/mobile_driver.git
 cd price_driver
 ```
 
