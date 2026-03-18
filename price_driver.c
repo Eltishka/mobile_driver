@@ -12,7 +12,7 @@
 
 #define DEVICE_NAME "price_feed"
 #define CLASS_NAME "price_class"
-#define BUFFER_SIZE 64
+#define BUFFER_SIZE 4096
 #define MAX_TICKERS 256
 #define TICKER_LEN 8
 #define PRICE_ENTRY_SIZE 12
@@ -46,7 +46,6 @@ static struct cdev c_dev;
 static struct class *dev_class;
 static struct device *dev_device;
 static ticker_config_t ticker_config = {NULL, 0};
-static int current_ticker_idx = 0;
 
 static int driver_open(struct inode *inode, struct file *file);
 static int driver_release(struct inode *inode, struct file *file);
@@ -89,6 +88,28 @@ static void pack_price_data(char *buffer, ticker_t *ticker) {
     price_ptr = (uint32_t *)(buffer + TICKER_LEN);
 
     *price_ptr = (uint32_t)ticker->current_price;
+}
+
+static ssize_t pack_all_prices(char *buffer, size_t max_size) {
+    int i;
+    ssize_t offset = 0;
+    
+    for (i = 0; i < ticker_config.count; i++) {
+        if (offset + PRICE_ENTRY_SIZE > max_size) {
+            break;
+        }
+        
+        generate_delta(&ticker_config.tickers[i]);
+        pack_price_data(buffer + offset, &ticker_config.tickers[i]);
+        
+        printk(KERN_DEBUG "price_feed: %s price = %ld\n", 
+               ticker_config.tickers[i].ticker, 
+               ticker_config.tickers[i].current_price);
+        
+        offset += PRICE_ENTRY_SIZE;
+    }
+    
+    return offset;
 }
 
 
@@ -240,40 +261,50 @@ static void cleanup_config(void) {
 }
 
 static ssize_t driver_read(struct file *file, char __user *buf, size_t count, loff_t *offset) {
-    char kernel_buffer[PRICE_ENTRY_SIZE];
-    ticker_t *ticker;
+    char *kernel_buffer;
+    ssize_t data_size;
     int ret;
     
     if (count < PRICE_ENTRY_SIZE) {
         return -EINVAL;
     }
     
+    kernel_buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+    if (!kernel_buffer) {
+        printk(KERN_ERR "price_feed: Failed to allocate kernel buffer\n");
+        return -ENOMEM;
+    }
+    
     mutex_lock(&ticker_config.lock);
     
     if (ticker_config.count == 0) {
         mutex_unlock(&ticker_config.lock);
+        kfree(kernel_buffer);
         printk(KERN_ERR "price_feed: No tickers configured\n");
         return -ENODATA;
     }
     
-    ticker = &ticker_config.tickers[current_ticker_idx];
-    generate_delta(ticker);
-    pack_price_data(kernel_buffer, ticker);
+    data_size = pack_all_prices(kernel_buffer, BUFFER_SIZE);
     
-    printk(KERN_DEBUG "price_feed: %s price = %ld\n", ticker->ticker, ticker->current_price);
-    
-    current_ticker_idx = (current_ticker_idx + 1) % ticker_config.count;
+    printk(KERN_INFO "price_feed: Generated %ld bytes of price data for %d tickers\n", 
+           data_size, ticker_config.count);
     
     mutex_unlock(&ticker_config.lock);
     
-    ret = copy_to_user(buf, kernel_buffer, PRICE_ENTRY_SIZE);
+    if (data_size > count) {
+        data_size = count;
+    }
+    
+    ret = copy_to_user(buf, kernel_buffer, data_size);
+    kfree(kernel_buffer);
+    
     if (ret) {
         printk(KERN_ERR "price_feed: Failed to send data to user\n");
         return -EFAULT;
     }
     
     msleep(100);
-    return PRICE_ENTRY_SIZE;
+    return data_size;
 }
 
 static int __init price_driver_init(void) {
