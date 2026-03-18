@@ -27,9 +27,12 @@ MODULE_VERSION("0.2");
 
 typedef struct {
     char ticker[TICKER_LEN];
-    int upper_bound;
-    int lower_bound;
-    int current_price;
+
+
+
+    long upper_bound;
+    long lower_bound;
+    long current_price;
 } ticker_t;
 
 typedef struct {
@@ -50,6 +53,7 @@ static int driver_release(struct inode *inode, struct file *file);
 static ssize_t driver_read(struct file *file, char __user *buf, size_t count, loff_t *offset);
 static int load_config_from_csv(const char *path);
 static void cleanup_config(void);
+
 static void generate_delta(ticker_t *ticker);
 static void pack_price_data(char *buffer, ticker_t *ticker);
 
@@ -83,18 +87,24 @@ static void pack_price_data(char *buffer, ticker_t *ticker) {
     }
     
     price_ptr = (uint32_t *)(buffer + TICKER_LEN);
+
     *price_ptr = (uint32_t)ticker->current_price;
 }
 
+
+
 static void generate_delta(ticker_t *ticker) {
-    int max_delta = ticker->upper_bound - ticker->lower_bound;
+    long max_delta = ticker->upper_bound - ticker->lower_bound;
     max_delta = (max_delta * MAX_DELTA_PERCENT) / 100;
     
     u32 rand_val = get_random_u32();
-    int delta = ((int)(rand_val % 1000) - 500);
+
+
+    long delta = ((long)(rand_val % 1000) - 500);
     delta = (delta * max_delta) / 500;
     
-    int new_price = ticker->current_price + delta;
+
+    long new_price = ticker->current_price + delta;
     
     if (new_price > ticker->upper_bound) {
         new_price = ticker->upper_bound;
@@ -103,6 +113,7 @@ static void generate_delta(ticker_t *ticker) {
     }
     
     ticker->current_price = new_price;
+
 }
 
 static int load_config_from_csv(const char *path) {
@@ -173,16 +184,20 @@ static int load_config_from_csv(const char *path) {
                     strncpy(temp_tickers[line_count].ticker, p, TICKER_LEN - 1);
                     temp_tickers[line_count].ticker[TICKER_LEN - 1] = '\0';
                 } else if (field == 1) {
+
                     kstrtol(p, 10, &temp_tickers[line_count].upper_bound);
                 } else if (field == 2) {
+
                     kstrtol(p, 10, &temp_tickers[line_count].lower_bound);
                 } else if (field == 3) {
+
                     kstrtol(p, 10, &temp_tickers[line_count].current_price);
                 }
                 field++;
             }
             
             if (field == 4) {
+
                 printk(KERN_INFO "price_feed: Loaded %s [%ld-%ld] initial=%ld\n",
                     temp_tickers[line_count].ticker,
                     temp_tickers[line_count].lower_bound,
