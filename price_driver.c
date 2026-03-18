@@ -19,6 +19,7 @@
 #define CONFIG_PATH "/etc/price_driver/config.csv"
 #define MAX_LINE_LEN 256
 #define MAX_DELTA_PERCENT 5
+#define GENERATION_TIMEOUT_MS 100
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("team");
@@ -302,7 +303,7 @@ static ssize_t driver_read(struct file *file, char __user *buf, size_t count, lo
         return -EFAULT;
     }
     
-    msleep(100);
+    msleep(GENERATION_TIMEOUT_MS);
     return data_size;
 }
 
