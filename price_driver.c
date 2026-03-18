@@ -27,9 +27,9 @@ MODULE_VERSION("0.2");
 
 typedef struct {
     char ticker[TICKER_LEN];
-    float upper_bound;
-    float lower_bound;
-    float current_price;
+    int upper_bound;
+    int lower_bound;
+    int current_price;
 } ticker_t;
 
 typedef struct {
@@ -50,7 +50,7 @@ static int driver_release(struct inode *inode, struct file *file);
 static ssize_t driver_read(struct file *file, char __user *buf, size_t count, loff_t *offset);
 static int load_config_from_csv(const char *path);
 static void cleanup_config(void);
-static float generate_delta(ticker_t *ticker);
+static void generate_delta(ticker_t *ticker);
 static void pack_price_data(char *buffer, ticker_t *ticker);
 
 static struct file_operations fops = {
@@ -83,18 +83,18 @@ static void pack_price_data(char *buffer, ticker_t *ticker) {
     }
     
     price_ptr = (uint32_t *)(buffer + TICKER_LEN);
-    memcpy(price_ptr, &ticker->current_price, sizeof(float));
+    *price_ptr = (uint32_t)ticker->current_price;
 }
 
-static float generate_delta(ticker_t *ticker) {
-    float max_delta = ticker->upper_bound - ticker->lower_bound;
+static void generate_delta(ticker_t *ticker) {
+    int max_delta = ticker->upper_bound - ticker->lower_bound;
     max_delta = (max_delta * MAX_DELTA_PERCENT) / 100;
     
     u32 rand_val = get_random_u32();
-    float delta = ((float)(rand_val % 1000) / 500.0f) - 1.0f;
-    delta *= max_delta;
+    int delta = ((int)(rand_val % 1000) - 500);
+    delta = (delta * max_delta) / 500;
     
-    float new_price = ticker->current_price + delta;
+    int new_price = ticker->current_price + delta;
     
     if (new_price > ticker->upper_bound) {
         new_price = ticker->upper_bound;
@@ -103,7 +103,6 @@ static float generate_delta(ticker_t *ticker) {
     }
     
     ticker->current_price = new_price;
-    return delta;
 }
 
 static int load_config_from_csv(const char *path) {
@@ -174,17 +173,17 @@ static int load_config_from_csv(const char *path) {
                     strncpy(temp_tickers[line_count].ticker, p, TICKER_LEN - 1);
                     temp_tickers[line_count].ticker[TICKER_LEN - 1] = '\0';
                 } else if (field == 1) {
-                    kstrtof(p, 10, &temp_tickers[line_count].upper_bound);
+                    kstrtol(p, 10, &temp_tickers[line_count].upper_bound);
                 } else if (field == 2) {
-                    kstrtof(p, 10, &temp_tickers[line_count].lower_bound);
+                    kstrtol(p, 10, &temp_tickers[line_count].lower_bound);
                 } else if (field == 3) {
-                    kstrtof(p, 10, &temp_tickers[line_count].current_price);
+                    kstrtol(p, 10, &temp_tickers[line_count].current_price);
                 }
                 field++;
             }
             
             if (field == 4) {
-                printk(KERN_INFO "price_feed: Loaded %s [%.2f-%.2f] initial=%.2f\n",
+                printk(KERN_INFO "price_feed: Loaded %s [%ld-%ld] initial=%ld\n",
                     temp_tickers[line_count].ticker,
                     temp_tickers[line_count].lower_bound,
                     temp_tickers[line_count].upper_bound,
@@ -245,6 +244,8 @@ static ssize_t driver_read(struct file *file, char __user *buf, size_t count, lo
     ticker = &ticker_config.tickers[current_ticker_idx];
     generate_delta(ticker);
     pack_price_data(kernel_buffer, ticker);
+    
+    printk(KERN_DEBUG "price_feed: %s price = %ld\n", ticker->ticker, ticker->current_price);
     
     current_ticker_idx = (current_ticker_idx + 1) % ticker_config.count;
     
