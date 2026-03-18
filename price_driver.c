@@ -12,6 +12,7 @@
 
 #define DEVICE_NAME "price_feed"
 #define CLASS_NAME "price_class"
+
 #define BUFFER_SIZE 4096
 #define MAX_TICKERS 256
 #define TICKER_LEN 8
@@ -21,6 +22,38 @@
 #define MAX_DELTA_PERCENT 5
 #define GENERATION_TIMEOUT_MS 100
 
+static int buffer_size = BUFFER_SIZE;
+module_param(buffer_size, int, 0644);
+MODULE_PARM_DESC(buffer_size, "Buffer size in bytes (default: 4096)");
+
+static int max_tickers = MAX_TICKERS;
+module_param(max_tickers, int, 0644);
+MODULE_PARM_DESC(max_tickers, "Maximum number of tickers (default: 256)");
+
+static int ticker_len = TICKER_LEN;
+module_param(ticker_len, int, 0644);
+MODULE_PARM_DESC(ticker_len, "Ticker string length (default: 8)");
+
+static int price_entry_size = PRICE_ENTRY_SIZE;
+module_param(price_entry_size, int, 0644);
+MODULE_PARM_DESC(price_entry_size, "Size of price entry in bytes (default: 12)");
+
+static char *config_path = CONFIG_PATH;
+module_param(config_path, charp, 0644);
+MODULE_PARM_DESC(config_path, "Path to CSV config file (default: /etc/price_driver/config.csv)");
+
+static int max_line_len = MAX_LINE_LEN;
+module_param(max_line_len, int, 0644);
+MODULE_PARM_DESC(max_line_len, "Maximum CSV line length (default: 256)");
+
+static int max_delta_percent = MAX_DELTA_PERCENT;
+module_param(max_delta_percent, int, 0644);
+MODULE_PARM_DESC(max_delta_percent, "Maximum delta percentage (default: 5)");
+
+static int generation_timeout_ms = GENERATION_TIMEOUT_MS;
+module_param(generation_timeout_ms, int, 0644);
+MODULE_PARM_DESC(generation_timeout_ms, "Generation timeout in ms (default: 100)");
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("team");
 MODULE_DESCRIPTION("Linux char driver for price feed with CSV config");
@@ -28,9 +61,6 @@ MODULE_VERSION("0.2");
 
 typedef struct {
     char ticker[TICKER_LEN];
-
-
-
     long upper_bound;
     long lower_bound;
     long current_price;
@@ -117,7 +147,7 @@ static ssize_t pack_all_prices(char *buffer, size_t max_size) {
 
 static void generate_delta(ticker_t *ticker) {
     long max_delta = ticker->upper_bound - ticker->lower_bound;
-    max_delta = (max_delta * MAX_DELTA_PERCENT) / 100;
+    max_delta = (max_delta * max_delta_percent) / 100;
     
     u32 rand_val = get_random_u32();
 
@@ -176,14 +206,14 @@ static int load_config_from_csv(const char *path) {
     file_content[file_size] = '\0';
     filp_close(fp, NULL);
     
-    temp_tickers = kmalloc(sizeof(ticker_t) * MAX_TICKERS, GFP_KERNEL);
+    temp_tickers = kmalloc(sizeof(ticker_t) * max_tickers, GFP_KERNEL);
     if (!temp_tickers) {
         kfree(file_content);
         return -ENOMEM;
     }
     
     line_start = file_content;
-    while (line_start && line_count < MAX_TICKERS) {
+    while (line_start && line_count < max_tickers) {
         line_end = strchr(line_start, '\n');
         if (line_end) {
             *line_end = '\0';
@@ -195,16 +225,16 @@ static int load_config_from_csv(const char *path) {
             char *rest = line_copy;
             int field = 0;
             
-            strncpy(line_copy, line_start, MAX_LINE_LEN - 1);
-            line_copy[MAX_LINE_LEN - 1] = '\0';
+            strncpy(line_copy, line_start, max_line_len - 1);
+            line_copy[max_line_len - 1] = '\0';
             
             while ((token = strsep(&rest, ",")) && field < 4) {
                 char *p = token;
                 while (*p == ' ') p++;
                 
                 if (field == 0) {
-                    strncpy(temp_tickers[line_count].ticker, p, TICKER_LEN - 1);
-                    temp_tickers[line_count].ticker[TICKER_LEN - 1] = '\0';
+                    strncpy(temp_tickers[line_count].ticker, p, ticker_len - 1);
+                    temp_tickers[line_count].ticker[ticker_len - 1] = '\0';
                 } else if (field == 1) {
 
                     kstrtol(p, 10, &temp_tickers[line_count].upper_bound);
@@ -265,11 +295,11 @@ static ssize_t driver_read(struct file *file, char __user *buf, size_t count, lo
     ssize_t data_size;
     int ret;
     
-    if (count < PRICE_ENTRY_SIZE) {
+    if (count < price_entry_size) {
         return -EINVAL;
     }
     
-    kernel_buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+    kernel_buffer = kmalloc(buffer_size, GFP_KERNEL);
     if (!kernel_buffer) {
         printk(KERN_ERR "price_feed: Failed to allocate kernel buffer\n");
         return -ENOMEM;
@@ -284,7 +314,7 @@ static ssize_t driver_read(struct file *file, char __user *buf, size_t count, lo
         return -ENODATA;
     }
     
-    data_size = pack_all_prices(kernel_buffer, BUFFER_SIZE);
+    data_size = pack_all_prices(kernel_buffer, buffer_size);
     
     printk(KERN_INFO "price_feed: Generated %ld bytes of price data for %d tickers\n", 
            data_size, ticker_config.count);
@@ -303,7 +333,7 @@ static ssize_t driver_read(struct file *file, char __user *buf, size_t count, lo
         return -EFAULT;
     }
     
-    msleep(GENERATION_TIMEOUT_MS);
+    msleep(generation_timeout_ms);
     return data_size;
 }
 
@@ -314,7 +344,7 @@ static int __init price_driver_init(void) {
     
     mutex_init(&ticker_config.lock);
     
-    ret = load_config_from_csv(CONFIG_PATH);
+    ret = load_config_from_csv(config_path);
     if (ret < 0) {
         printk(KERN_WARNING "price_feed: Config not loaded, will use empty config\n");
     }
